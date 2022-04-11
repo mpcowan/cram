@@ -5,7 +5,6 @@ use std::fs::File;
 use std::time::Instant;
 
 use clap::Parser;
-use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 
 #[derive(clap::ArgEnum, Clone, Debug)]
 enum Algorithm {
@@ -42,11 +41,11 @@ fn elapsed_secs(elapsed: Duration) -> f64 {
 }
 
 fn compress_lz4(input: &Vec<u8>) -> Vec<u8> {
-  compress_prepend_size(input)
+  lz4_flex::compress_prepend_size(input)
 }
 
 fn decompress_lz4(input: &Vec<u8>) -> Vec<u8> {
-  decompress_size_prepended(&input).unwrap()
+  lz4_flex::decompress_size_prepended(&input).unwrap()
 }
 
 fn compress_snappy(input: &Vec<u8>) -> Vec<u8> {
