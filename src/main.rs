@@ -5,6 +5,7 @@ use std::fs::File;
 use std::time::Instant;
 
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 
 mod compressor;
 use crate::compressor::{Brotli, Compressor, Gzip, Lz4, Snappy, Zstd};
@@ -38,23 +39,41 @@ struct Args {
   file: std::path::PathBuf,
   // Operation to perform
   #[clap(arg_enum, short, long, default_value_t = Operation::Benchmark)]
-  operation: Operation
+  operation: Operation,
+  // number of iterations to run for benchmarking
+  #[clap(short, long, default_value_t = 25)]
+  iterations: u32,
 }
 
 fn elapsed_secs(elapsed: Duration) -> f64 {
   elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9
 }
 
+fn format_size(bytes: usize) -> String {
+  if bytes < 1024 {
+    format!("{} B", bytes)
+  } else if bytes < 1024 * 1024 {
+    format!("{:.1} KB", bytes as f64 / 1024_f64)
+  } else if bytes < 1024 * 1024 * 1024 {
+    format!("{:.2} MB", bytes as f64 / 1048576_f64)
+  } else {
+    format!("{:.2} GB", bytes as f64 / 1073741824_f64)
+  }
+}
+
 fn main() {
   let args = Args::parse();
 
-  let mut f = File::open(args.file).unwrap();
+  let mut f = File::open(args.file.clone()).unwrap();
   let mut buffer = Vec::new();
   f.read_to_end(&mut buffer).unwrap();
 
   match args.operation {
     Operation::Benchmark => {
       let size_in_mb = buffer.len() as f64 / 1048576_f64;
+      println!("Running {} iterations of all algorithms on {:?}", args.iterations, args.file);
+      println!("Input size: {}", format_size(buffer.len()));
+
       let mut ratio = 100.0;
 
       let mut algs: Vec<Box<dyn Compressor>> = Vec::new();
@@ -65,10 +84,19 @@ fn main() {
       algs.push(Box::new(Zstd::new()));
 
       for alg in algs {
+        println!();
+        let progress = ProgressBar::new(args.iterations as u64);
+        progress.set_style(
+          ProgressStyle::default_bar()
+            .template("{msg} {wide_bar:.cyan/blue} {pos:>7}/{len:7}")
+            .progress_chars("#>-")
+        );
+        progress.set_message(alg.get_name());
         let mut compression_rate_sum = 0.0;
         let mut decompression_rate_sum = 0.0;
 
-        for _ in 0..25 {
+        for _ in 0..args.iterations {
+          progress.inc(1);
           let start = Instant::now();
           let compressed = alg.compress(&buffer);
           compression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
@@ -78,8 +106,9 @@ fn main() {
           alg.decompress(&compressed);
           decompression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
         }
-        println!("\n{} compression: ratio={:.2} rate={:.1} MBps", alg.get_name(), ratio, compression_rate_sum / 25.0);
-        println!("{} decompression: rate={:.1} MBps", alg.get_name(), decompression_rate_sum / 25.0);
+        progress.finish_and_clear();
+        println!("{} compression: ratio={:.2} rate={:.1} MBps", alg.get_name(), ratio, compression_rate_sum / args.iterations as f64);
+        println!("{} decompression: rate={:.1} MBps", alg.get_name(), decompression_rate_sum / args.iterations as f64);
       }
     },
     Operation::Compress => {
