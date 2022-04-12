@@ -6,7 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+brotli = "3.3.4"
 clap = { version = "3.1.8", features = ["derive"] }
+libflate = "1.2.0"
 lz4_flex = "0.9.2"
 snap = "1.0.5"
 zstd = "0.11.1+zstd.1.5.2"

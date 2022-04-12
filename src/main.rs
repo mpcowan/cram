@@ -6,9 +6,14 @@ use std::time::Instant;
 
 use clap::Parser;
 
+mod compressor;
+use crate::compressor::{Brotli, Compressor, Gzip, Lz4, Snappy, Zstd};
+
 #[derive(clap::ArgEnum, Clone, Debug)]
 enum Algorithm {
   All,
+  Brotli,
+  Gzip,
   Lz4,
   Snappy,
   Zstd,
@@ -40,90 +45,6 @@ fn elapsed_secs(elapsed: Duration) -> f64 {
   elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9
 }
 
-pub trait Compressor {
-  fn compress(&self, input: &Vec<u8>) -> Vec<u8>;
-  fn decompress(&self, input: &Vec<u8>) -> Vec<u8>;
-  fn get_name(&self) -> &'static str;
-}
-
-pub struct Lz4 {
-  pub name: &'static str,
-}
-
-impl Lz4 {
-  fn new(name: &'static str) -> Lz4 {
-    Lz4 { name }
-  }
-}
-
-impl Compressor for Lz4 {
-  fn compress(&self, input: &Vec<u8>) -> Vec<u8> {
-    lz4_flex::compress_prepend_size(input)
-  }
-  fn decompress(&self, input: &Vec<u8>) -> Vec<u8> {
-    lz4_flex::decompress_size_prepended(&input).unwrap()
-  }
-  fn get_name(&self) -> &'static str {
-    &self.name
-  }
-}
-
-pub struct Snappy {
-  pub name: &'static str,
-}
-
-impl Snappy {
-  fn new(name: &'static str) -> Snappy {
-    Snappy { name }
-  }
-}
-
-impl Compressor for Snappy {
-  fn compress(&self, input: &Vec<u8>) -> Vec<u8> {
-    let snappy_writer = Vec::new();
-    let mut snap_writer = snap::write::FrameEncoder::new(snappy_writer);
-    io::copy(&mut &input[..], &mut snap_writer).unwrap();
-    snap_writer.into_inner().unwrap()
-  }
-  fn decompress(&self, input: &Vec<u8>) -> Vec<u8> {
-    let mut rdr = snap::read::FrameDecoder::new(&input[..]);
-    let mut snap_writer = Vec::new();
-    io::copy(&mut rdr, &mut snap_writer).unwrap();
-    snap_writer
-  }
-  fn get_name(&self) -> &'static str {
-    &self.name
-  }
-}
-
-pub struct Zstd {
-  pub name: &'static str,
-}
-
-impl Zstd {
-  fn new(name: &'static str) -> Zstd {
-    Zstd { name }
-  }
-}
-
-impl Compressor for Zstd {
-  fn compress(&self, input: &Vec<u8>) -> Vec<u8> {
-    let zstd_writer = Vec::new();
-    // while level 3 is the default, level 1 seems more fair for this comparison
-    let mut encoder = zstd::stream::Encoder::new(zstd_writer, 1).unwrap();
-    io::copy(&mut &input[..], &mut encoder).unwrap();
-    encoder.finish().unwrap()
-  }
-  fn decompress(&self, input: &Vec<u8>) -> Vec<u8> {
-    let mut zstd_writer = Vec::new();
-    zstd::stream::copy_decode(&input[..], &mut zstd_writer).unwrap();
-    zstd_writer
-  }
-  fn get_name(&self) -> &'static str {
-    &self.name
-  }
-}
-
 fn main() {
   let args = Args::parse();
 
@@ -137,9 +58,11 @@ fn main() {
       let mut ratio = 100.0;
 
       let mut algs: Vec<Box<dyn Compressor>> = Vec::new();
-      algs.push(Box::new(Lz4::new("lz4")));
-      algs.push(Box::new(Snappy::new("snappy")));
-      algs.push(Box::new(Zstd::new("zstd")));
+      algs.push(Box::new(Brotli::new()));
+      algs.push(Box::new(Gzip::new()));
+      algs.push(Box::new(Lz4::new()));
+      algs.push(Box::new(Snappy::new()));
+      algs.push(Box::new(Zstd::new()));
 
       for alg in algs {
         let mut compression_rate_sum = 0.0;
@@ -162,18 +85,22 @@ fn main() {
     Operation::Compress => {
       let compressed = match args.algorithm {
         Algorithm::All => Vec::new(),
-        Algorithm::Lz4 => Lz4::new("lz4").compress(&buffer),
-        Algorithm::Snappy => Snappy::new("snappy").compress(&buffer),
-        Algorithm::Zstd =>  Zstd::new("zstd").compress(&buffer),
+        Algorithm::Brotli => Brotli::new().compress(&buffer),
+        Algorithm::Gzip => Gzip::new().compress(&buffer),
+        Algorithm::Lz4 => Lz4::new().compress(&buffer),
+        Algorithm::Snappy => Snappy::new().compress(&buffer),
+        Algorithm::Zstd =>  Zstd::new().compress(&buffer),
       };
       io::stdout().write_all(&compressed).unwrap();
     },
     Operation::Decompress => {
       let decompressed = match args.algorithm {
         Algorithm::All => Vec::new(),
-        Algorithm::Lz4 => Lz4::new("lz4").decompress(&buffer),
-        Algorithm::Snappy => Snappy::new("snappy").decompress(&buffer),
-        Algorithm::Zstd =>  Zstd::new("zstd").decompress(&buffer),
+        Algorithm::Brotli => Brotli::new().decompress(&buffer),
+        Algorithm::Gzip => Gzip::new().decompress(&buffer),
+        Algorithm::Lz4 => Lz4::new().decompress(&buffer),
+        Algorithm::Snappy => Snappy::new().decompress(&buffer),
+        Algorithm::Zstd =>  Zstd::new().decompress(&buffer),
       };
       io::stdout().write_all(&decompressed).unwrap();
     },
