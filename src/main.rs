@@ -72,13 +72,13 @@ fn main() {
           let start = Instant::now();
           let compressed = alg.compress(&buffer);
           compression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
-          ratio = 100.0 * compressed.len() as f64 / buffer.len() as f64;
+          ratio = buffer.len() as f64 / compressed.len() as f64;
 
           let start = Instant::now();
           alg.decompress(&compressed);
           decompression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
         }
-        println!("\n{} compression: ratio={:.2}% rate={:.1} MBps", alg.get_name(), ratio, compression_rate_sum / 25.0);
+        println!("\n{} compression: ratio={:.2} rate={:.1} MBps", alg.get_name(), ratio, compression_rate_sum / 25.0);
         println!("{} decompression: rate={:.1} MBps", alg.get_name(), decompression_rate_sum / 25.0);
       }
     },
