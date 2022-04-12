@@ -40,39 +40,88 @@ fn elapsed_secs(elapsed: Duration) -> f64 {
   elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9
 }
 
-fn compress_lz4(input: &Vec<u8>) -> Vec<u8> {
-  lz4_flex::compress_prepend_size(input)
+pub trait Compressor {
+  fn compress(&self, input: &Vec<u8>) -> Vec<u8>;
+  fn decompress(&self, input: &Vec<u8>) -> Vec<u8>;
+  fn get_name(&self) -> &'static str;
 }
 
-fn decompress_lz4(input: &Vec<u8>) -> Vec<u8> {
-  lz4_flex::decompress_size_prepended(&input).unwrap()
+pub struct Lz4 {
+  pub name: &'static str,
 }
 
-fn compress_snappy(input: &Vec<u8>) -> Vec<u8> {
-  let snappy_writer = Vec::new();
-  let mut snap_writer = snap::write::FrameEncoder::new(snappy_writer);
-  io::copy(&mut &input[..], &mut snap_writer).unwrap();
-  snap_writer.into_inner().unwrap()
+impl Lz4 {
+  fn new(name: &'static str) -> Lz4 {
+    Lz4 { name }
+  }
 }
 
-fn decompress_snappy(input: &Vec<u8>) -> Vec<u8> {
-  let mut rdr = snap::read::FrameDecoder::new(&input[..]);
-  let mut snap_writer = Vec::new();
-  io::copy(&mut rdr, &mut snap_writer).unwrap();
-  snap_writer
+impl Compressor for Lz4 {
+  fn compress(&self, input: &Vec<u8>) -> Vec<u8> {
+    lz4_flex::compress_prepend_size(input)
+  }
+  fn decompress(&self, input: &Vec<u8>) -> Vec<u8> {
+    lz4_flex::decompress_size_prepended(&input).unwrap()
+  }
+  fn get_name(&self) -> &'static str {
+    &self.name
+  }
 }
 
-fn compress_zstd(input: &Vec<u8>) -> Vec<u8> {
-  let zstd_writer = Vec::new();
-  let mut encoder = zstd::stream::Encoder::new(zstd_writer, 0).unwrap();
-  io::copy(&mut &input[..], &mut encoder).unwrap();
-  encoder.finish().unwrap()
+pub struct Snappy {
+  pub name: &'static str,
 }
 
-fn decompress_zstd(input: &Vec<u8>) -> Vec<u8> {
-  let mut zstd_writer = Vec::new();
-  zstd::stream::copy_decode(&input[..], &mut zstd_writer).unwrap();
-  zstd_writer
+impl Snappy {
+  fn new(name: &'static str) -> Snappy {
+    Snappy { name }
+  }
+}
+
+impl Compressor for Snappy {
+  fn compress(&self, input: &Vec<u8>) -> Vec<u8> {
+    let snappy_writer = Vec::new();
+    let mut snap_writer = snap::write::FrameEncoder::new(snappy_writer);
+    io::copy(&mut &input[..], &mut snap_writer).unwrap();
+    snap_writer.into_inner().unwrap()
+  }
+  fn decompress(&self, input: &Vec<u8>) -> Vec<u8> {
+    let mut rdr = snap::read::FrameDecoder::new(&input[..]);
+    let mut snap_writer = Vec::new();
+    io::copy(&mut rdr, &mut snap_writer).unwrap();
+    snap_writer
+  }
+  fn get_name(&self) -> &'static str {
+    &self.name
+  }
+}
+
+pub struct Zstd {
+  pub name: &'static str,
+}
+
+impl Zstd {
+  fn new(name: &'static str) -> Zstd {
+    Zstd { name }
+  }
+}
+
+impl Compressor for Zstd {
+  fn compress(&self, input: &Vec<u8>) -> Vec<u8> {
+    let zstd_writer = Vec::new();
+    // while level 3 is the default, level 1 seems more fair for this comparison
+    let mut encoder = zstd::stream::Encoder::new(zstd_writer, 1).unwrap();
+    io::copy(&mut &input[..], &mut encoder).unwrap();
+    encoder.finish().unwrap()
+  }
+  fn decompress(&self, input: &Vec<u8>) -> Vec<u8> {
+    let mut zstd_writer = Vec::new();
+    zstd::stream::copy_decode(&input[..], &mut zstd_writer).unwrap();
+    zstd_writer
+  }
+  fn get_name(&self) -> &'static str {
+    &self.name
+  }
 }
 
 fn main() {
@@ -85,68 +134,46 @@ fn main() {
   match args.operation {
     Operation::Benchmark => {
       let size_in_mb = buffer.len() as f64 / 1048576 as f64;
-      let mut compression_rate_sum = 0.0;
-      let mut decompression_rate_sum = 0.0;
       let mut ratio = 100.0;
 
-      for _ in 0..25 {
-        let start = Instant::now();
-        let compressed = compress_lz4(&buffer);
-        compression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
-        ratio = 100.0 * compressed.len() as f64 / buffer.len() as f64;
+      let mut algs: Vec<Box<dyn Compressor>> = Vec::new();
+      algs.push(Box::new(Lz4::new("lz4")));
+      algs.push(Box::new(Snappy::new("snappy")));
+      algs.push(Box::new(Zstd::new("zstd")));
 
-        let start = Instant::now();
-        decompress_lz4(&compressed);
-        decompression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
+      for alg in algs {
+        let mut compression_rate_sum = 0.0;
+        let mut decompression_rate_sum = 0.0;
+
+        for _ in 0..25 {
+          let start = Instant::now();
+          let compressed = alg.compress(&buffer);
+          compression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
+          ratio = 100.0 * compressed.len() as f64 / buffer.len() as f64;
+
+          let start = Instant::now();
+          alg.decompress(&compressed);
+          decompression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
+        }
+        println!("\n{} compression: ratio={:.2}% rate={:.1} MBps", alg.get_name(), ratio, compression_rate_sum / 25.0);
+        println!("{} decompression: rate={:.1} MBps", alg.get_name(), decompression_rate_sum / 25.0);
       }
-      println!("\nlz4 compression: ratio={:.2}% rate={:.1} MBps", ratio, compression_rate_sum / 25.0);
-      println!("lz4 decompression: rate={:.1} MBps", decompression_rate_sum / 25.0);
-
-      compression_rate_sum = 0.0;
-      decompression_rate_sum = 0.0;
-      for _ in 0..25 {
-        let start = Instant::now();
-        let compressed = compress_snappy(&buffer);
-        compression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
-        ratio = 100.0 * compressed.len() as f64 / buffer.len() as f64;
-
-        let start = Instant::now();
-        decompress_snappy(&compressed);
-        decompression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
-      }
-      println!("\nsnappy compression: ratio={:.2}% rate={:.1} MBps", ratio, compression_rate_sum / 25.0);
-      println!("snappy decompression: rate={:.1} MBps", decompression_rate_sum / 25.0);
-
-      compression_rate_sum = 0.0;
-      decompression_rate_sum = 0.0;
-      for _ in 0..25 {
-        let start = Instant::now();
-        let compressed = compress_zstd(&buffer);
-        compression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
-        ratio = 100.0 * compressed.len() as f64 / buffer.len() as f64;
-
-        let start = Instant::now();
-        decompress_zstd(&compressed);
-        decompression_rate_sum += size_in_mb / elapsed_secs(start.elapsed());
-      }
-      println!("\nzstd compression: ratio={:.2}% rate={:.1} MBps", ratio, compression_rate_sum / 25.0);
-      println!("zstd decompression: rate={:.1} MBps", decompression_rate_sum / 25.0);
     },
     Operation::Compress => {
       let compressed = match args.algorithm {
         Algorithm::All => Vec::new(),
-        Algorithm::Lz4 => compress_lz4(&buffer),
-        Algorithm::Snappy => compress_snappy(&buffer),
-        Algorithm::Zstd => compress_zstd(&buffer),
+        Algorithm::Lz4 => Lz4::new("lz4").compress(&buffer),
+        Algorithm::Snappy => Snappy::new("snappy").compress(&buffer),
+        Algorithm::Zstd =>  Zstd::new("zstd").compress(&buffer),
       };
       io::stdout().write_all(&compressed).unwrap();
     },
     Operation::Decompress => {
       let decompressed = match args.algorithm {
         Algorithm::All => Vec::new(),
-        Algorithm::Lz4 => decompress_lz4(&buffer),
-        Algorithm::Snappy => decompress_snappy(&buffer),
-        Algorithm::Zstd => decompress_zstd(&buffer),
+        Algorithm::Lz4 => Lz4::new("lz4").decompress(&buffer),
+        Algorithm::Snappy => Snappy::new("snappy").decompress(&buffer),
+        Algorithm::Zstd =>  Zstd::new("zstd").decompress(&buffer),
       };
       io::stdout().write_all(&decompressed).unwrap();
     },
