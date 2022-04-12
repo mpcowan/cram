@@ -54,7 +54,7 @@ fn main() {
 
   match args.operation {
     Operation::Benchmark => {
-      let size_in_mb = buffer.len() as f64 / 1048576 as f64;
+      let size_in_mb = buffer.len() as f64 / 1048576_f64;
       let mut ratio = 100.0;
 
       let mut algs: Vec<Box<dyn Compressor>> = Vec::new();
