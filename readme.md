@@ -1,6 +1,6 @@
 # Cram
 
-Small Rust CLI utility to compress/decompress data using LZ4, Snappy, or ZSTD algorithms.
+Small Rust CLI utility to compress/decompress data using Brotli, Gzip, LZ4, Snappy, or ZSTD algorithms.
 
 ## Build
 
