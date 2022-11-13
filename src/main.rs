@@ -40,6 +40,8 @@ struct Args {
   // Operation to perform
   #[clap(arg_enum, short, long, default_value_t = Operation::Benchmark)]
   operation: Operation,
+  #[clap(short, long, action)]
+  base64: bool,
   // number of iterations to run for benchmarking
   #[clap(short, long, default_value_t = 25)]
   iterations: u32,
@@ -66,7 +68,24 @@ fn main() {
 
   let mut f = File::open(args.file.clone()).unwrap();
   let mut buffer = Vec::new();
-  f.read_to_end(&mut buffer).unwrap();
+  match args.base64 {
+    true => {
+      match args.operation {
+        Operation::Decompress => {
+          let mut b64_reader = base64::read::DecoderReader::new(&mut f, base64::STANDARD);
+          b64_reader.read_to_end(&mut buffer).unwrap();
+        },
+        _ => {
+          f.read_to_end(&mut buffer).unwrap();
+        }
+      }
+    },
+    false => {
+      f.read_to_end(&mut buffer).unwrap();
+    }
+  }
+
+  let mut b64_writer = base64::write::EncoderWriter::new(io::stdout(), base64::STANDARD);
 
   match args.operation {
     Operation::Benchmark => {
@@ -120,7 +139,11 @@ fn main() {
         Algorithm::Snappy => Snappy::new().compress(&buffer),
         Algorithm::Zstd =>  Zstd::new().compress(&buffer),
       };
-      io::stdout().write_all(&compressed).unwrap();
+      if args.base64 {
+        b64_writer.write_all(&compressed).unwrap();
+      } else {
+        io::stdout().write_all(&compressed).unwrap();
+      }
     },
     Operation::Decompress => {
       let decompressed = match args.algorithm {
